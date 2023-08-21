@@ -2,74 +2,69 @@ import re
 import sys
 import argparse
 
-def remove_comments(content):
-    # Remove block comments
-    content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
+def extract_datasets_from_dofile(dofile_path, save_to_file=False):
+    with open(dofile_path, 'r') as f:
+        content = f.read()
 
-    # Remove line comments starting with *
-    content = re.sub(r'^\*.*?$', '', content, flags=re.MULTILINE)
+    # Split by exit command if it exists
+    parts = content.split('exit', 1)
+    analyzed_content = parts[0]
 
-    # Remove single line comments starting with //
-    content = re.sub(r'//.*?$', '', content, flags=re.MULTILINE)
+    # Remove all comments (both // and /* */ style)
+    analyzed_content = re.sub(r'//.*', '', analyzed_content)
+    analyzed_content = re.sub(r'/\*.*?\*/', '', analyzed_content, flags=re.DOTALL)
 
-    return content
+    # Extract datasets
+    entry_datasets = set(re.findall(r'\buse\b\s+(.*?)(?:,|\n)', analyzed_content))
+    output_datasets = set(re.findall(r'(?:\bsave\b|\boutsheet\b)\s+(.*?)(?:,|\n)', analyzed_content))
+    using_datasets = set(re.findall(r'\busing\b\s+(.*?)(?:,|\n)', analyzed_content))
+    temp_datasets = set(re.findall(r'\btempfile\b\s+(.*?)(?:\s|\n)', analyzed_content))
 
-def truncate_after_exit(content):
-    content_no_comments = remove_comments(content)
-    exit_position = content_no_comments.find('exit')
-    if exit_position != -1:
-        content = content[:content.find('exit')]
-    return content
+    # Remove outputs from entry if they appear in both
+    entry_datasets = entry_datasets - output_datasets
 
-def extract_datasets(dofile, save_to_file):
-    with open(dofile, 'r') as file:
-        content = file.read()
+    # Print datasets
+    print("Datasets used as entry:")
+    for dataset in sorted(entry_datasets):
+        print(f"// {dataset}")
 
-    content = truncate_after_exit(content)
-    content_no_comments = remove_comments(content)
+    print("\nDatasets produced and reused within the code:")
+    reused_datasets = output_datasets.intersection(entry_datasets).union(output_datasets.intersection(using_datasets))
+    for dataset in sorted(reused_datasets):
+        print(f"// {dataset}")
 
-    use_pattern = re.compile(r'\buse ([^\s,]+)', re.IGNORECASE)
-    save_pattern = re.compile(r'\bsave ([^\s,]+)', re.IGNORECASE)
-    using_pattern = re.compile(r'\busing ([^\s,]+)', re.IGNORECASE)
+    print("\nDatasets produced but not reused within the code:")
+    not_reused_datasets = output_datasets - reused_datasets
+    for dataset in sorted(not_reused_datasets):
+        print(f"// {dataset}")
 
-    used_datasets = use_pattern.findall(content_no_comments) + using_pattern.findall(content_no_comments)
-    saved_datasets = save_pattern.findall(content_no_comments)
+    print("\nTemporary datasets created with 'tempfile':")
+    for dataset in sorted(temp_datasets):
+        print(f"// '{dataset}'")
 
-    entry_datasets = set(used_datasets) - set(saved_datasets)  # Removing output datasets from entry datasets
-
-    reused_datasets = set(saved_datasets).intersection(used_datasets)
-    not_reused_datasets = set(saved_datasets).difference(reused_datasets)
-
-    print("Datasets Used as Entry (Excluding those also saved as output within the code):")
-    for dataset in entry_datasets:
-        print(f"* {dataset}")
-
-    print("\nDatasets Produced and Reused:")
-    for dataset in reused_datasets:
-        print(f"* {dataset}")
-
-    print("\nDatasets Produced but not Reused:")
-    for dataset in not_reused_datasets:
-        print(f"* {dataset}")
-
+    # Save to file if the flag is set
     if save_to_file:
-        with open("output_datasets.txt", "w") as out_file:
-            out_file.write("* Datasets Used as Entry (Excluding those also saved as output within the code):\n")
-            for dataset in entry_datasets:
-                out_file.write(f"* {dataset}\n")
+        with open("output_datasets_info.txt", 'w') as f:
+            f.write("Datasets used as entry:\n")
+            for dataset in sorted(entry_datasets):
+                f.write(f"// {dataset}\n")
 
-            out_file.write("\n* Datasets Produced and Reused:\n")
-            for dataset in reused_datasets:
-                out_file.write(f"* {dataset}\n")
+            f.write("\nDatasets produced and reused within the code:\n")
+            for dataset in sorted(reused_datasets):
+                f.write(f"// {dataset}\n")
 
-            out_file.write("\n* Datasets Produced but not Reused:\n")
-            for dataset in not_reused_datasets:
-                out_file.write(f"* {dataset}\n")
+            f.write("\nDatasets produced but not reused within the code:\n")
+            for dataset in sorted(not_reused_datasets):
+                f.write(f"// {dataset}\n")
+
+            f.write("\nTemporary datasets created with 'tempfile':\n")
+            for dataset in sorted(temp_datasets):
+                f.write(f"// '{dataset}'\n")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Extract dataset information from a Stata do-file.')
-    parser.add_argument('dofile', type=str, help='Path to the Stata do-file.')
-    parser.add_argument('-s', '--save', action='store_true', help='Save output to output_datasets.txt file.')
-
+    parser = argparse.ArgumentParser(description="Extract datasets from a Stata do-file.")
+    parser.add_argument("dofile_path", help="Path to the Stata do-file.")
+    parser.add_argument("-s", "--save", help="Save datasets info to an output file.", action="store_true")
     args = parser.parse_args()
-    extract_datasets(args.dofile, args.save)
+
+    extract_datasets_from_dofile(args.dofile_path, args.save)
